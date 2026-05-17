@@ -3,7 +3,13 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
 # --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="Unlock! Tracker", layout="wide", page_icon="🎮")
+# "expanded" force le menu à essayer de s'ouvrir au chargement
+st.set_page_config(
+    page_title="Unlock! Tracker", 
+    layout="wide", 
+    page_icon="🎮",
+    initial_sidebar_state="expanded" 
+)
 
 # --- CONNEXION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -36,10 +42,8 @@ def load_game_data():
         if df_loaded.empty:
             return pd.DataFrame()
         
-        # Normalisation des colonnes
         df_loaded.columns = [str(c).lower().replace(' ', '_').strip() for c in df_loaded.columns]
         
-        # RÉCUPÉRATION DES COLONNES D, E, F (Index 3, 4, 5)
         if len(df_loaded.columns) >= 6:
             df_loaded['nom_jeu_1'] = df_loaded.iloc[:, 3]
             df_loaded['nom_jeu_2'] = df_loaded.iloc[:, 4]
@@ -64,57 +68,70 @@ df = load_game_data()
 
 # --- SIDEBAR (MENU GAUCHE) ---
 with st.sidebar:
-    st.title("👤 JOUEURS")
+    st.title("⚙️ CONFIGURATION")
+    st.markdown("---")
     
-    with st.expander("➕ Nouveau Joueur"):
-        nouveau_nom = st.text_input("Prénom")
-        if st.button("Ajouter"):
+    st.subheader("👤 Choisir ton profil")
+    if joueurs:
+        utilisateur = st.selectbox("Qui es-tu ?", joueurs, index=None, placeholder="Choisis ton nom...")
+    else:
+        st.warning("Aucun joueur trouvé.")
+        utilisateur = None
+
+    st.markdown("---")
+    with st.expander("➕ Ajouter un nouveau joueur"):
+        nouveau_nom = st.text_input("Prénom du joueur")
+        if st.button("Valider l'ajout"):
             if nouveau_nom and add_new_user(nouveau_nom):
                 st.success(f"{nouveau_nom} ajouté !"); st.rerun()
 
-    if joueurs:
-        utilisateur = st.selectbox("Qui es-tu ?", joueurs)
-    else:
-        st.warning("Ajoute un joueur pour commencer.")
-        utilisateur = None
-
-    st.divider()
+    st.markdown("---")
     st.link_button("🌐 Site Unlock (Nouveautés)", "https://www.spacecowboys-games.com/game/unlock/", use_container_width=True)
-    if st.button("🔄 Actualiser"):
+    if st.button("🔄 Rafraîchir les données", use_container_width=True):
         st.cache_data.clear(); st.rerun()
 
 # --- INTERFACE PRINCIPALE ---
+
+# SOLUTION MOBILE : Afficher une instruction claire si aucun utilisateur n'est sélectionné
 if not utilisateur:
-    st.info("👋 Bonjour ! Ajoute ton prénom dans la barre latérale pour commencer.")
+    st.markdown("""
+        <div style="background-color:#ff4b4b; padding:20px; border-radius:10px; text-align:center;">
+            <h2 style="color:white; margin:0;">⬅️ ACTION REQUISE</h2>
+            <p style="color:white; font-size:1.2em;">
+                Clique sur la <b>petite flèche en haut à gauche</b> (ou sur le bouton menu) 
+                pour <b>choisir ton nom</b> ou ajouter un joueur !
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+    st.info("Une fois ton nom choisi dans le menu de gauche, ta progression s'affichera ici.")
     st.stop()
 
-st.title(f"🎮 Suivi de {utilisateur}")
+# Si l'utilisateur est connecté, on affiche le titre normal
+st.title(f"🎮 Progression de : {utilisateur}")
 
 col_suivi = f"fait_{utilisateur.lower().replace(' ', '_')}"
 if col_suivi not in df.columns:
     df[col_suivi] = ""
 
-search = st.text_input("Filtrer les boîtes...", "").lower()
+search = st.text_input("🔍 Rechercher une boîte...", "").lower()
 df_display = df[df['boite_titre'].astype(str).str.lower().str.contains(search)] if search else df
 
 # --- AFFICHAGE DES JEUX ---
 for idx, row in df_display.iterrows():
     
-    # 1. IMAGE RÉDUITE (Moitié de la largeur, centrée)
+    # IMAGE RÉDUITE (Moitié de la largeur, centrée)
     url = str(row.get('image_url', '')).strip()
     if url.startswith('http'):
-        # On crée 3 colonnes : vide (25%), image (50%), vide (25%)
-        # Cela réduit l'image de moitié par rapport à avant
         c1, c2, c3 = st.columns([1, 2, 1])
         with c2:
             st.image(url, use_container_width=True)
     else:
         st.info(f"🖼️ {row['boite_titre']} (Image manquante)")
 
-    # 2. TITRE
+    # TITRE
     st.markdown(f"<h2 style='text-align: center;'>{row['boite_titre']}</h2>", unsafe_allow_html=True)
     
-    # 3. LES 3 JEUX (Colonnes D, E, F)
+    # LES 3 JEUX (Colonnes D, E, F)
     cols = st.columns(3)
     faits_actuels = [x.strip() for x in str(row.get(col_suivi, "")).split(',') if x.strip()]
     noms_des_scenarios = [row.get('nom_jeu_1', 'Jeu 1'), row.get('nom_jeu_2', 'Jeu 2'), row.get('nom_jeu_3', 'Jeu 3')]
