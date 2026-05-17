@@ -8,25 +8,32 @@ st.set_page_config(page_title="Unlock! Tracker", layout="wide", page_icon="🎮"
 # --- CONNEXION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
+# --- CHARGEMENT DES UTILISATEURS ---
+def load_users():
+    try:
+        # Lit l'onglet "Utilisateurs"
+        users_df = conn.read(worksheet="Utilisateurs", ttl=0)
+        # On prend la première colonne et on enlève les vides
+        return users_df.iloc[:, 0].dropna().tolist()
+    except:
+        # Liste de secours si l'onglet n'est pas trouvé
+        return ["Papa", "Maman", "Lucas"]
+
+# --- CHARGEMENT DES JEUX ---
 def load_game_data():
-    # Lecture brute
+    # Lit l'onglet principal (Catalogue)
     df_loaded = conn.read(ttl=0)
     
     if df_loaded.empty:
         return pd.DataFrame()
 
-    # NORMALISATION FORCEE DES COLONNES
-    # On met tout en minuscule, on retire les espaces et les caractères bizarres
+    # Normalisation des colonnes (minuscules, sans espaces)
     df_loaded.columns = [str(c).lower().replace(' ', '_').strip() for c in df_loaded.columns]
     
-    # On cherche la colonne qui ressemble le plus à "boite_titre"
-    # Si elle n'existe pas, on prend la première colonne qui contient du texte
-    if 'boite_titre' not in df_loaded.columns:
-        return pd.DataFrame() # On s'arrête si on ne trouve pas la colonne principale
-
-    # Nettoyage des lignes vides
-    df_loaded = df_loaded.dropna(subset=['boite_titre'])
-    df_loaded = df_loaded[df_loaded['boite_titre'].astype(str).str.len() > 1]
+    # On garde seulement les lignes avec un titre de boîte
+    if 'boite_titre' in df_loaded.columns:
+        df_loaded = df_loaded.dropna(subset=['boite_titre'])
+        df_loaded = df_loaded[df_loaded['boite_titre'].astype(str).str.len() > 1]
     
     return df_loaded.fillna("")
 
@@ -34,81 +41,73 @@ def save_game_data(df_to_save):
     conn.update(data=df_to_save)
     st.cache_data.clear()
 
-# --- CHARGEMENT ---
+# --- INITIALISATION ---
+joueurs = load_users()
 df = load_game_data()
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("👤 JOUEURS")
-    joueurs = ["Papa", "Maman", "Lucas", "Julie", "Thomas", "Sarah", "Antoine", "Emma", "Victor", "Chloe"] 
     utilisateur = st.selectbox("Qui es-tu ?", joueurs)
     
     st.divider()
+    st.markdown("### 🔍 Liens")
     st.link_button("🌐 Site Unlock (Nouveautés)", "https://www.spacecowboys-games.com/game/unlock/", use_container_width=True)
     
-    if st.button("🔄 Actualiser la page", use_container_width=True):
+    if st.button("🔄 Actualiser les données", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
-    
-    # ZONE DE DEBUG (Masquée par défaut)
-    with st.expander("🛠 Debug Colonnes"):
-        if not df.empty:
-            st.write("Colonnes lues :", list(df.columns))
-        else:
-            st.write("Le fichier semble vide ou illisible.")
 
 # --- INTERFACE PRINCIPALE ---
 st.title(f"🎮 Suivi Unlock : {utilisateur}")
 
 if df.empty:
-    st.error("⚠️ Impossible de trouver la colonne 'boite_titre' dans ton Google Sheet.")
-    st.info("Vérifie que tes titres de colonnes sont bien sur la PREMIÈRE LIGNE de ton fichier.")
+    st.error("⚠️ Impossible de lire les jeux. Vérifie ton onglet 'Catalogue'.")
     st.stop()
 
-# Gestion de la colonne de suivi
-col_suivi = f"fait_{utilisateur.lower()}"
+# Gestion de la colonne de suivi pour le joueur
+col_suivi = f"fait_{utilisateur.lower().replace(' ', '_')}"
 if col_suivi not in df.columns:
     df[col_suivi] = ""
 
 # Recherche
-search = st.text_input("Filtrer par nom de boîte...", "").lower()
+search = st.text_input("Rechercher une boîte...", "").lower()
 df_display = df[df['boite_titre'].astype(str).str.lower().str.contains(search)] if search else df
 
-# --- AFFICHAGE DES CARTES ---
+# --- AFFICHAGE ---
 for idx, row in df_display.iterrows():
     with st.container():
         c_img, c_txt = st.columns([1, 4])
         
         with c_img:
-            # Sécurité sur image_url : on vérifie si la colonne existe
-            url = ""
-            if 'image_url' in row:
-                url = str(row['image_url']).strip()
-            
+            # Affichage image
+            url = str(row['image_url']).strip() if 'image_url' in row else ""
             if url.startswith('http'):
                 st.image(url, width=100)
             else:
-                st.image("https://via.placeholder.com/100?text=Pas+d'image", width=100)
+                st.image("https://via.placeholder.com/100?text=No+Image", width=100)
         
         with c_txt:
-            # Sécurité sur boite_titre
-            titre = row['boite_titre'] if 'boite_titre' in row else "Sans titre"
-            st.subheader(titre)
+            st.subheader(row['boite_titre'])
     
-    # Checkboxes
+    # Les 3 scénarios
     cols = st.columns(3)
     faits_actuels = [x.strip() for x in str(row[col_suivi]).split(',') if x.strip()]
 
     for i in range(1, 4):
         with cols[i-1]:
-            # Sécurité sur les noms de jeux
+            # RECUPERATION DU VRAI NOM DU JEU
             col_nom = f'j{i}_nom'
-            game_name = str(row[col_nom]).strip() if col_nom in row and str(row[col_nom]) != "nan" and str(row[col_nom]) != "" else f"Jeu {i}"
+            if col_nom in row and str(row[col_nom]).strip() != "" and str(row[col_nom]) != "nan":
+                game_label = str(row[col_nom])
+            else:
+                game_label = f"Scénario {i} (vide)"
             
             game_id = f"Jeu{i}"
             is_done = game_id in faits_actuels
             
-            if st.checkbox(game_name, value=is_done, key=f"{utilisateur}_{idx}_{i}"):
+            # Case à cocher avec le vrai nom
+            if st.checkbox(game_label, value=is_done, key=f"{utilisateur}_{idx}_{i}"):
                 if not is_done:
                     faits_actuels.append(game_id)
                     df.at[idx, col_suivi] = ",".join(faits_actuels)
