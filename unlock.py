@@ -9,71 +9,94 @@ st.set_page_config(page_title="Unlock! Tracker", layout="wide", page_icon="🎮"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_game_data():
-    # On lit la TOUTE PREMIÈRE FEUILLE du fichier (peu importe son nom)
+    # Lit la première feuille
     df_loaded = conn.read(ttl=0)
     
-    # Nettoyage : On enlève les lignes vides
+    # NETTOYAGE : On supprime toutes les lignes où le titre est vide
     if 'boite_titre' in df_loaded.columns:
         df_loaded = df_loaded.dropna(subset=['boite_titre'])
-        df_loaded = df_loaded[df_loaded['boite_titre'] != ""]
+        df_loaded = df_loaded[df_loaded['boite_titre'].str.strip() != ""]
     
-    # Vérification des colonnes nécessaires (Vérifie bien que ces noms sont en haut de tes colonnes !)
-    required = ['id', 'boite_titre', 'image_url', 'j1_nom', 'j1_fait', 'j2_nom', 'j2_fait', 'j3_nom', 'j3_fait']
-    for col in required:
-        if col not in df_loaded.columns:
-            df_loaded[col] = "False" if "fait" in col else ""
-            
-    return df_loaded
+    return df_loaded.fillna("")
 
 def save_game_data(df_to_save):
-    # On sauvegarde sur la première feuille par défaut
     conn.update(data=df_to_save)
     st.cache_data.clear()
 
-# --- INTERFACE ---
+# --- CHARGEMENT ---
 df = load_game_data()
 
-# --- SIDEBAR (LIEN ET ADMIN) ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.title("⚙️ Options")
-    st.markdown("### 🔍 Vérifier les nouveautés")
-    st.link_button("🌐 Aller sur Space Cowboys (Unlock)", "https://www.spacecowboys.fr/unlock-games", use_container_width=True)
+    st.title("👥 Joueurs")
+    # Liste des joueurs (Tu peux en ajouter d'autres ici)
+    joueurs = ["Papa", "Maman", "Lucas", "Julie", "Ami1", "Ami2"] 
+    utilisateur = st.selectbox("Qui es-tu ?", joueurs)
     
-    if st.button("🔄 Actualiser l'App", use_container_width=True):
+    st.divider()
+    st.markdown("### 🔍 Liens Utiles")
+    st.link_button("🌐 Site Unlock (Nouveautés)", "https://www.spacecowboys-games.com/game/unlock/", use_container_width=True)
+    
+    if st.button("🔄 Actualiser la page", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
-# --- CONTENU PRINCIPAL ---
-st.title("🎮 Mon Suivi Unlock!")
+# --- INTERFACE PRINCIPALE ---
+st.title(f"🎮 Suivi de {utilisateur}")
+
+# Nom de la colonne pour ce joueur
+col_suivi = f"Fait_{utilisateur}"
+if col_suivi not in df.columns:
+    df[col_suivi] = ""
 
 # Recherche
 search = st.text_input("Filtrer par nom de boîte...", "").lower()
 df_display = df[df['boite_titre'].str.lower().str.contains(search)] if search else df
 
-# Affichage des cartes
-for idx, row in df_display.iterrows():
-    img = row['image_url'] if row['image_url'] else "https://via.placeholder.com/150"
-    
-    st.markdown(f"""
-    <div style='background-color: white; padding: 15px; border-radius: 10px; border: 1px solid #eee; margin-bottom: 10px;'>
-        <div style='display: flex; align-items: center; gap: 20px;'>
-            <img src="{img}" style='width: 70px; height: 70px; border-radius: 5px; object-fit: cover;'>
-            <h3 style='margin: 0;'>{row['boite_titre']}</h3>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+if df_display.empty:
+    st.warning("Aucune donnée trouvée dans ton fichier Google Sheets. Vérifie que la colonne 'boite_titre' est bien remplie.")
 
+for idx, row in df_display.iterrows():
+    # Affichage de la boîte
+    with st.container():
+        c_img, c_txt = st.columns([1, 5])
+        
+        with c_img:
+            url = str(row['image_url']).strip()
+            if url.startswith('http'):
+                st.image(url, width=100)
+            else:
+                # Image par défaut si le lien est mort ou vide
+                st.image("https://via.placeholder.com/100?text=Pas+d'image", width=100)
+        
+        with c_txt:
+            st.subheader(row['boite_titre'])
+    
+    # Gestion des 3 jeux
     cols = st.columns(3)
+    faits_actuels = [x.strip() for x in str(row[col_suivi]).split(',') if x.strip()]
+
     for i in range(1, 4):
         with cols[i-1]:
-            game_name = row[f'j{i}_nom']
-            is_done = str(row[f'j{i}_fait']) == "True"
+            # On récupère le nom du jeu. S'il est vide, on met un nom par défaut pour éviter l'erreur
+            game_name = str(row[f'j{i}_nom']).strip()
+            if not game_name:
+                game_name = f"Jeu {i}"
+                
+            game_id = f"Jeu{i}"
+            is_done = game_id in faits_actuels
             
-            # On utilise l'index pour éviter les doublons
-            new_val = st.checkbox(f"{game_name}", value=is_done, key=f"chk_{idx}_{i}")
-            
-            if new_val != is_done:
-                df.at[idx, f'j{i}_fait'] = str(new_val)
-                save_game_data(df)
-                st.rerun()
+            # Checkbox
+            if st.checkbox(game_name, value=is_done, key=f"{utilisateur}_{idx}_{i}"):
+                if not is_done:
+                    faits_actuels.append(game_id)
+                    df.at[idx, col_suivi] = ",".join(faits_actuels)
+                    save_game_data(df)
+                    st.rerun()
+            else:
+                if is_done:
+                    faits_actuels.remove(game_id)
+                    df.at[idx, col_suivi] = ",".join(faits_actuels)
+                    save_game_data(df)
+                    st.rerun()
     st.divider()
