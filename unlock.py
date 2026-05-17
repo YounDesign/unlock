@@ -64,7 +64,8 @@ def game_box_card(idx, row, df):
             
             # Checkbox pour marquer comme fait
             # On utilise une clé unique : nom de la boite + index du jeu
-            new_val = st.checkbox(f"{game_name}", value=is_done, key=f"chk_{row['boite_titre']}_{i}")
+            new_val = st.checkbox(f"{game_name}", value=is_done, key=f"chk_{idx}_{i}")
+
             
             # Si on clique sur la case, on sauvegarde
             if new_val != is_done:
@@ -73,8 +74,12 @@ def game_box_card(idx, row, df):
                 st.rerun()
 
 # --- INTERFACE PRINCIPALE ---
-df = load_game_data()
-
+df = load_game_data():
+    df_loaded = conn.read(worksheet="Catalogue", ttl=0)
+    
+    # On supprime les lignes totalement vides ou sans titre de boîte
+    df_loaded = df_loaded.dropna(subset=['boite_titre'])
+    df_loaded = df_loaded[df_loaded['boite_titre'] != ""]
 st.title("🎮 Suivi de mes Jeux")
 
 # Barre de recherche
