@@ -9,55 +9,63 @@ st.set_page_config(page_title="Unlock! Tracker", layout="wide", page_icon="🎮"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_game_data():
-    # Lit la première feuille
+    # Lecture brute
     df_loaded = conn.read(ttl=0)
     
-    # NETTOYAGE DES COLONNES : on met tout en minuscules et on remplace les espaces par des _
+    if df_loaded.empty:
+        return pd.DataFrame()
+
+    # NORMALISATION FORCEE DES COLONNES
+    # On met tout en minuscule, on retire les espaces et les caractères bizarres
     df_loaded.columns = [str(c).lower().replace(' ', '_').strip() for c in df_loaded.columns]
     
-    # Liste des colonnes dont on a ABSOLUMENT besoin
-    required = ['boite_titre', 'image_url', 'j1_nom', 'j2_nom', 'j3_nom']
-    for col in required:
-        if col not in df_loaded.columns:
-            df_loaded[col] = "" # Crée la colonne vide si elle manque
-    
-    # On supprime les lignes où le titre est vide
+    # On cherche la colonne qui ressemble le plus à "boite_titre"
+    # Si elle n'existe pas, on prend la première colonne qui contient du texte
+    if 'boite_titre' not in df_loaded.columns:
+        return pd.DataFrame() # On s'arrête si on ne trouve pas la colonne principale
+
+    # Nettoyage des lignes vides
     df_loaded = df_loaded.dropna(subset=['boite_titre'])
-    df_loaded = df_loaded[df_loaded['boite_titre'].astype(str).str.strip() != ""]
+    df_loaded = df_loaded[df_loaded['boite_titre'].astype(str).str.len() > 1]
     
     return df_loaded.fillna("")
 
 def save_game_data(df_to_save):
-    # On ne sauvegarde pas les colonnes temporaires de calcul
     conn.update(data=df_to_save)
     st.cache_data.clear()
 
 # --- CHARGEMENT ---
-try:
-    df = load_game_data()
-except Exception as e:
-    st.error(f"Erreur lors du chargement du Google Sheet : {e}")
-    st.stop()
+df = load_game_data()
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.title("👥 Joueurs")
-    # Liste des joueurs
-    joueurs = ["Papa", "Maman", "Lucas", "Julie", "Ami1", "Ami2", "Ami3", "Ami4", "Ami5", "Ami6"] 
+    st.title("👤 JOUEURS")
+    joueurs = ["Papa", "Maman", "Lucas", "Julie", "Thomas", "Sarah", "Antoine", "Emma", "Victor", "Chloe"] 
     utilisateur = st.selectbox("Qui es-tu ?", joueurs)
     
     st.divider()
-    st.markdown("### 🔍 Liens")
-    st.link_button("🌐 Site Unlock (Vérifier nouveautés)", "https://www.spacecowboys-games.com/game/unlock/", use_container_width=True)
+    st.link_button("🌐 Site Unlock (Nouveautés)", "https://www.spacecowboys-games.com/game/unlock/", use_container_width=True)
     
-    if st.button("🔄 Actualiser l'App", use_container_width=True):
+    if st.button("🔄 Actualiser la page", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
+    
+    # ZONE DE DEBUG (Masquée par défaut)
+    with st.expander("🛠 Debug Colonnes"):
+        if not df.empty:
+            st.write("Colonnes lues :", list(df.columns))
+        else:
+            st.write("Le fichier semble vide ou illisible.")
 
 # --- INTERFACE PRINCIPALE ---
-st.title(f"🎮 Suivi de {utilisateur}")
+st.title(f"🎮 Suivi Unlock : {utilisateur}")
 
-# Nom de la colonne pour ce joueur
+if df.empty:
+    st.error("⚠️ Impossible de trouver la colonne 'boite_titre' dans ton Google Sheet.")
+    st.info("Vérifie que tes titres de colonnes sont bien sur la PREMIÈRE LIGNE de ton fichier.")
+    st.stop()
+
+# Gestion de la colonne de suivi
 col_suivi = f"fait_{utilisateur.lower()}"
 if col_suivi not in df.columns:
     df[col_suivi] = ""
@@ -66,42 +74,40 @@ if col_suivi not in df.columns:
 search = st.text_input("Filtrer par nom de boîte...", "").lower()
 df_display = df[df['boite_titre'].astype(str).str.lower().str.contains(search)] if search else df
 
-if df_display.empty:
-    st.info("Aucune boîte trouvée. Vérifie ton fichier Google Sheet !")
-    st.write("Colonnes détectées dans ton fichier :", list(df.columns))
-
+# --- AFFICHAGE DES CARTES ---
 for idx, row in df_display.iterrows():
-    # Affichage de la boîte
     with st.container():
-        c_img, c_txt = st.columns([1, 5])
+        c_img, c_txt = st.columns([1, 4])
         
         with c_img:
-            url = str(row['image_url']).strip()
+            # Sécurité sur image_url : on vérifie si la colonne existe
+            url = ""
+            if 'image_url' in row:
+                url = str(row['image_url']).strip()
+            
             if url.startswith('http'):
                 st.image(url, width=100)
             else:
-                st.image("https://via.placeholder.com/100?text=Lien+Image+HS", width=100)
+                st.image("https://via.placeholder.com/100?text=Pas+d'image", width=100)
         
         with c_txt:
-            st.subheader(row['boite_titre'])
+            # Sécurité sur boite_titre
+            titre = row['boite_titre'] if 'boite_titre' in row else "Sans titre"
+            st.subheader(titre)
     
-    # Gestion des 3 jeux
+    # Checkboxes
     cols = st.columns(3)
-    # On nettoie la liste des jeux faits
     faits_actuels = [x.strip() for x in str(row[col_suivi]).split(',') if x.strip()]
 
     for i in range(1, 4):
         with cols[i-1]:
-            # Sécurité sur le nom du jeu
-            col_name = f'j{i}_nom'
-            game_name = str(row[col_name]).strip() if col_name in row else f"Jeu {i}"
-            if not game_name or game_name == "nan":
-                game_name = f"Jeu {i}"
-                
+            # Sécurité sur les noms de jeux
+            col_nom = f'j{i}_nom'
+            game_name = str(row[col_nom]).strip() if col_nom in row and str(row[col_nom]) != "nan" and str(row[col_nom]) != "" else f"Jeu {i}"
+            
             game_id = f"Jeu{i}"
             is_done = game_id in faits_actuels
             
-            # Checkbox
             if st.checkbox(game_name, value=is_done, key=f"{utilisateur}_{idx}_{i}"):
                 if not is_done:
                     faits_actuels.append(game_id)
