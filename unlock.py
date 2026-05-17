@@ -11,35 +11,40 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # --- CHARGEMENT DES UTILISATEURS ---
 def load_users():
     try:
-        # Lit l'onglet "Utilisateurs"
+        # On tente de lire l'onglet "Utilisateurs"
         users_df = conn.read(worksheet="Utilisateurs", ttl=0)
-        # On prend la première colonne et on enlève les vides
-        return users_df.iloc[:, 0].dropna().tolist()
+        # On récupère la première colonne
+        noms = users_df.iloc[:, 0].dropna().astype(str).tolist()
+        # Si la liste est vide, on met des noms par défaut
+        return noms if noms else ["Papa", "Maman", "Lucas"]
     except:
-        # Liste de secours si l'onglet n'est pas trouvé
-        return ["Papa", "Maman", "Lucas"]
+        # Si l'onglet n'existe pas, liste de secours
+        return ["Papa", "Maman", "Lucas", "Julie"]
 
 # --- CHARGEMENT DES JEUX ---
 def load_game_data():
-    # Lit l'onglet principal (Catalogue)
-    df_loaded = conn.read(ttl=0)
-    
-    if df_loaded.empty:
+    try:
+        # Lit le premier onglet (Catalogue)
+        df_loaded = conn.read(ttl=0)
+        if df_loaded.empty: return pd.DataFrame()
+
+        # Normalisation des colonnes : minuscules et pas d'espaces
+        df_loaded.columns = [str(c).lower().replace(' ', '_').strip() for c in df_loaded.columns]
+        
+        # On garde les lignes avec un titre
+        if 'boite_titre' in df_loaded.columns:
+            df_loaded = df_loaded.dropna(subset=['boite_titre'])
+            df_loaded = df_loaded[df_loaded['boite_titre'].astype(str).str.strip() != ""]
+        return df_loaded.fillna("")
+    except:
         return pd.DataFrame()
 
-    # Normalisation des colonnes (minuscules, sans espaces)
-    df_loaded.columns = [str(c).lower().replace(' ', '_').strip() for c in df_loaded.columns]
-    
-    # On garde seulement les lignes avec un titre de boîte
-    if 'boite_titre' in df_loaded.columns:
-        df_loaded = df_loaded.dropna(subset=['boite_titre'])
-        df_loaded = df_loaded[df_loaded['boite_titre'].astype(str).str.len() > 1]
-    
-    return df_loaded.fillna("")
-
 def save_game_data(df_to_save):
-    conn.update(data=df_to_save)
-    st.cache_data.clear()
+    try:
+        conn.update(data=df_to_save)
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Erreur de sauvegarde : {e}")
 
 # --- INITIALISATION ---
 joueurs = load_users()
@@ -48,7 +53,13 @@ df = load_game_data()
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("👤 JOUEURS")
-    utilisateur = st.selectbox("Qui es-tu ?", joueurs)
+    
+    # Sécurité si joueurs est vide
+    if not joueurs: joueurs = ["Joueur 1"]
+    
+    utilisateur_brut = st.selectbox("Qui es-tu ?", joueurs)
+    # On transforme en texte pour éviter l'AttributeError
+    utilisateur = str(utilisateur_brut) if utilisateur_brut else "Joueur"
     
     st.divider()
     st.markdown("### 🔍 Liens")
@@ -62,10 +73,10 @@ with st.sidebar:
 st.title(f"🎮 Suivi Unlock : {utilisateur}")
 
 if df.empty:
-    st.error("⚠️ Impossible de lire les jeux. Vérifie ton onglet 'Catalogue'.")
+    st.error("⚠️ Impossible de lire les jeux. Vérifie ton onglet 'Catalogue' ou que la colonne 'boite_titre' existe.")
     st.stop()
 
-# Gestion de la colonne de suivi pour le joueur
+# Nom de la colonne de suivi pour le joueur actuel
 col_suivi = f"fait_{utilisateur.lower().replace(' ', '_')}"
 if col_suivi not in df.columns:
     df[col_suivi] = ""
@@ -80,33 +91,36 @@ for idx, row in df_display.iterrows():
         c_img, c_txt = st.columns([1, 4])
         
         with c_img:
-            # Affichage image
-            url = str(row['image_url']).strip() if 'image_url' in row else ""
+            # Gestion image avec row.get pour éviter les erreurs si la colonne manque
+            url = str(row.get('image_url', '')).strip()
             if url.startswith('http'):
                 st.image(url, width=100)
             else:
-                st.image("https://via.placeholder.com/100?text=No+Image", width=100)
+                st.image("https://via.placeholder.com/100?text=Image+Manquante", width=100)
         
         with c_txt:
-            st.subheader(row['boite_titre'])
+            st.subheader(row.get('boite_titre', 'Sans titre'))
     
     # Les 3 scénarios
     cols = st.columns(3)
-    faits_actuels = [x.strip() for x in str(row[col_suivi]).split(',') if x.strip()]
+    # Récupération sécurisée des jeux faits
+    suivi_data = str(row.get(col_suivi, ""))
+    faits_actuels = [x.strip() for x in suivi_data.split(',') if x.strip()]
 
     for i in range(1, 4):
         with cols[i-1]:
-            # RECUPERATION DU VRAI NOM DU JEU
+            # RECUPERATION DU NOM DU JEU (ex: j1_nom)
             col_nom = f'j{i}_nom'
-            if col_nom in row and str(row[col_nom]).strip() != "" and str(row[col_nom]) != "nan":
-                game_label = str(row[col_nom])
-            else:
-                game_label = f"Scénario {i} (vide)"
+            game_label = str(row.get(col_nom, "")).strip()
+            
+            # Si le nom est vide dans ton Google Sheet
+            if not game_label or game_label == "nan":
+                game_label = f"Scénario {i}"
             
             game_id = f"Jeu{i}"
             is_done = game_id in faits_actuels
             
-            # Case à cocher avec le vrai nom
+            # Case à cocher avec le vrai nom du jeu
             if st.checkbox(game_label, value=is_done, key=f"{utilisateur}_{idx}_{i}"):
                 if not is_done:
                     faits_actuels.append(game_id)
