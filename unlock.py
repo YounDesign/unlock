@@ -2,108 +2,84 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-# --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="My Game Tracker", layout="wide")
+# --- CONFIGURATION ---
+st.set_page_config(page_title="Unlock! Tracker", layout="wide", page_icon="🎮")
 
 # --- CONNEXION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_game_data():
-    # Lit la toute première feuille par défaut
-    df_loaded = conn.read(ttl=0)
+    # On lit l'onglet Catalogue (Assurez-vous que le nom est exact dans votre Sheet)
+    df_loaded = conn.read(worksheet="Catalogue", ttl=0)
     
-    # Liste des colonnes obligatoires pour éviter les erreurs KeyError
-    required_columns = [
-        'id', 'boite_titre', 'image_url', 
-        'j1_nom', 'j1_fait', 
-        'j2_nom', 'j2_fait', 
-        'j3_nom', 'j3_fait'
-    ]
+    # Nettoyage : On enlève les lignes vides
+    if 'boite_titre' in df_loaded.columns:
+        df_loaded = df_loaded.dropna(subset=['boite_titre'])
+        df_loaded = df_loaded[df_loaded['boite_titre'] != ""]
     
-    # Si une colonne manque, on la crée vide
-    for col in required_columns:
+    # Vérification des colonnes nécessaires
+    required = ['id', 'boite_titre', 'image_url', 'j1_nom', 'j1_fait', 'j2_nom', 'j2_fait', 'j3_nom', 'j3_fait']
+    for col in required:
         if col not in df_loaded.columns:
             df_loaded[col] = "False" if "fait" in col else ""
             
-    return df_loaded.fillna("")
+    return df_loaded
 
-def save_game_data(df_to_save)
-    # On précise bien l'onglet où sauvegarder
+def save_game_data(df_to_save):
     conn.update(worksheet="Catalogue", data=df_to_save)
     st.cache_data.clear()
 
-# --- COMPOSANT CARTE DE JEU ---
-def game_box_card(idx, row, df):
-    # Préparation de l'image (si vide, on met un placeholder)
-    img_src = row['image_url'] if row['image_url'] != "" else "https://via.placeholder.com/150"
-    
-    # Calcul de la progression (combien de True sur les 3 jeux)
-    faits = [str(row['j1_fait']), str(row['j2_fait']), str(row['j3_fait'])]
-    score = faits.count("True")
+# --- INTERFACE ---
+df = load_game_data()
 
-    # Affichage de l'entête de la boîte (HTML)
+# --- SIDEBAR (LIEN ET ADMIN) ---
+with st.sidebar:
+    st.title("⚙️ Options")
+    
+    # LE LIEN POUR VÉRIFIER LES MISES À JOUR
+    st.markdown("### 🔍 Vérifier les nouveautés")
+    st.link_button("🌐 Aller sur Space Cowboys (Unlock)", "https://www.spacecowboys.fr/unlock-games", use_container_width=True)
+    
+    st.info("Si vous avez ajouté des jeux dans votre Google Sheet, cliquez ci-dessous :")
+    if st.button("🔄 Actualiser l'App", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
+# --- CONTENU PRINCIPAL ---
+st.title("🎮 Mon Suivi Unlock!")
+st.write("Cochez vos jeux faits. Les changements sont enregistrés directement dans votre Sheet.")
+
+# Recherche
+search = st.text_input("Filtrer par nom de boîte...", "").lower()
+df_display = df[df['boite_titre'].str.lower().str.contains(search)] if search else df
+
+# Affichage des cartes
+for idx, row in df_display.iterrows():
+    # On prépare l'image
+    img = row['image_url'] if row['image_url'] else "https://via.placeholder.com/150"
+    
+    # Design de la carte
     st.markdown(f"""
-    <div style='border: 1px solid #ddd; padding:15px; border-radius:10px; margin-bottom:10px; background-color:white; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);'>
-        <div style='display:flex; gap:15px; align-items:center;'>
-            <img src="{img_src}" style='width:80px; height:80px; border-radius:5px; object-fit:cover;'>
-            <div>
-                <h3 style='margin:0;'>{row['boite_titre']}</h3>
-                <p style='color:gray; font-size:0.9em; margin:0;'>Progression : {score}/3</p>
-            </div>
+    <div style='background-color: white; padding: 15px; border-radius: 10px; border: 1px solid #eee; margin-bottom: 10px;'>
+        <div style='display: flex; align-items: center; gap: 20px;'>
+            <img src="{img}" style='width: 70px; height: 70px; border-radius: 5px; object-fit: cover;'>
+            <h3 style='margin: 0;'>{row['boite_titre']}</h3>
         </div>
     </div>
     """, unsafe_allow_html=True)
-    
-    # Affichage des 3 jeux avec colonnes Streamlit
-    c1, c2, c3 = st.columns(3)
+
+    # Les 3 jeux (checkboxes)
+    cols = st.columns(3)
     for i in range(1, 4):
-        with [c1, c2, c3][i-1]:
+        with cols[i-1]:
             game_name = row[f'j{i}_nom']
-            # On vérifie si c'est fait
             is_done = str(row[f'j{i}_fait']) == "True"
             
-            # Checkbox pour marquer comme fait
-            # On utilise une clé unique : nom de la boite + index du jeu
+            # Utilisation de l'index de ligne (idx) pour éviter l'erreur de doublon
             new_val = st.checkbox(f"{game_name}", value=is_done, key=f"chk_{idx}_{i}")
-
             
-            # Si on clique sur la case, on sauvegarde
             if new_val != is_done:
                 df.at[idx, f'j{i}_fait'] = str(new_val)
                 save_game_data(df)
                 st.rerun()
-
-# --- INTERFACE PRINCIPALE ---
-df = load_game_data():
-    df_loaded = conn.read(worksheet="Catalogue", ttl=0)
-    
-    # On supprime les lignes totalement vides ou sans titre de boîte
-    df_loaded = df_loaded.dropna(subset=['boite_titre'])
-    df_loaded = df_loaded[df_loaded['boite_titre'] != ""]
-st.title("🎮 Suivi de mes Jeux")
-
-# Barre de recherche
-search = st.text_input("🔍 Rechercher une boîte...", placeholder="Ex: Mythic Adventures").lower()
-
-if search:
-    df_display = df[df['boite_titre'].str.lower().str.contains(search)]
-else:
-    df_display = df
-
-# Affichage des cartes
-if not df_display.empty:
-    for idx, row in df_display.iterrows():
-        game_box_card(idx, row, df)
-        st.divider()
-else:
-    st.info("Aucun résultat. Vérifiez l'orthographe ou le nom des colonnes dans votre Google Sheet.")
-
-# --- SIDEBAR ADMIN ---
-with st.sidebar:
-    st.header("⚙️ Admin")
-    st.write("Colonnes détectées :")
-    st.code(list(df.columns))
-    
-    if st.button("🔄 Forcer l'actualisation"):
-        st.cache_data.clear()
-        st.rerun()
+    st.divider()
