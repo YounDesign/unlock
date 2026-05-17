@@ -2,8 +2,7 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-# --- CONFIGURATION DE LA PAGE ---
-# "expanded" force le menu à essayer de s'ouvrir au chargement
+# --- CONFIGURATION ---
 st.set_page_config(
     page_title="Unlock! Tracker", 
     layout="wide", 
@@ -11,15 +10,19 @@ st.set_page_config(
     initial_sidebar_state="expanded" 
 )
 
+# --- MÉMOIRE DE L'APPLICATION (SESSION STATE) ---
+if 'user_index' not in st.session_state:
+    st.session_state.user_index = None
+
 # --- CONNEXION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- FONCTIONS POUR LES UTILISATEURS ---
+# --- CHARGEMENT UTILISATEURS ---
 def load_users():
     try:
         users_df = conn.read(worksheet="Utilisateurs", ttl=0)
         return users_df.iloc[:, 0].dropna().astype(str).tolist()
-    except Exception:
+    except:
         return []
 
 def add_new_user(new_name):
@@ -32,34 +35,17 @@ def add_new_user(new_name):
             st.cache_data.clear()
             return True
         return False
-    except Exception:
+    except:
         return False
 
-# --- FONCTIONS POUR LES JEUX ---
+# --- CHARGEMENT JEUX ---
 def load_game_data():
-    try:
-        df_loaded = conn.read(ttl=0)
-        if df_loaded.empty:
-            return pd.DataFrame()
-        
-        df_loaded.columns = [str(c).lower().replace(' ', '_').strip() for c in df_loaded.columns]
-        
-        if len(df_loaded.columns) >= 6:
-            df_loaded['nom_jeu_1'] = df_loaded.iloc[:, 3]
-            df_loaded['nom_jeu_2'] = df_loaded.iloc[:, 4]
-            df_loaded['nom_jeu_3'] = df_loaded.iloc[:, 5]
-            
-        if 'boite_titre' in df_loaded.columns:
-            df_loaded = df_loaded.dropna(subset=['boite_titre'])
-            
-        return df_loaded.fillna("")
-    except Exception:
-        return pd.DataFrame()
+    df = conn.read(ttl=0)
+    return df.fillna("")
 
 def save_game_data(df_to_save):
-    cols_a_virer = ['nom_jeu_1', 'nom_jeu_2', 'nom_jeu_3']
-    df_propre = df_to_save.drop(columns=[c for c in cols_a_virer if c in df_to_save.columns])
-    conn.update(data=df_propre)
+    conn.update(data=df_to_save)
+    # On ne vide pas le cache brutalement pour éviter les sauts de page
     st.cache_data.clear()
 
 # --- INITIALISATION ---
@@ -69,80 +55,102 @@ df = load_game_data()
 # --- SIDEBAR (MENU GAUCHE) ---
 with st.sidebar:
     st.title("⚙️ CONFIGURATION")
-    st.markdown("---")
     
-    st.subheader("👤 Choisir ton profil")
+    st.subheader("👤 Ton Profil")
+    
+    # On utilise l'index mémorisé pour que le nom RESTE sélectionné
     if joueurs:
-        utilisateur = st.selectbox("Qui es-tu ?", joueurs, index=None, placeholder="Choisis ton nom...")
+        # On cherche l'index du joueur précédemment choisi
+        default_idx = None
+        if st.session_state.user_index is not None and st.session_state.user_index < len(joueurs):
+            default_idx = st.session_state.user_index
+            
+        choice = st.selectbox(
+            "Qui es-tu ?", 
+            joueurs, 
+            index=default_idx,
+            placeholder="Choisis ton nom...",
+            key="user_selector"
+        )
+        
+        # Si le choix change, on met à jour la mémoire
+        if choice:
+            st.session_state.user_index = joueurs.index(choice)
+            utilisateur = choice
+        else:
+            utilisateur = None
     else:
-        st.warning("Aucun joueur trouvé.")
+        st.warning("Ajoute un joueur ci-dessous.")
         utilisateur = None
 
     st.markdown("---")
-    with st.expander("➕ Ajouter un nouveau joueur"):
-        nouveau_nom = st.text_input("Prénom du joueur")
-        if st.button("Valider l'ajout"):
+    with st.expander("➕ Nouveau Joueur"):
+        nouveau_nom = st.text_input("Prénom")
+        if st.button("Valider"):
             if nouveau_nom and add_new_user(nouveau_nom):
-                st.success(f"{nouveau_nom} ajouté !"); st.rerun()
+                st.success("Ajouté !"); st.rerun()
 
     st.markdown("---")
-    st.link_button("🌐 Site Unlock (Nouveautés)", "https://www.spacecowboys-games.com/game/unlock/", use_container_width=True)
-    if st.button("🔄 Rafraîchir les données", use_container_width=True):
-        st.cache_data.clear(); st.rerun()
+    st.link_button("🌐 Site Unlock", "https://www.spacecowboys-games.com/game/unlock/", use_container_width=True)
+    if st.button("🔄 Rafraîchir l'App", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
 
 # --- INTERFACE PRINCIPALE ---
-
-# SOLUTION MOBILE : Afficher une instruction claire si aucun utilisateur n'est sélectionné
 if not utilisateur:
     st.markdown("""
         <div style="background-color:#ff4b4b; padding:20px; border-radius:10px; text-align:center;">
             <h2 style="color:white; margin:0;">⬅️ ACTION REQUISE</h2>
-            <p style="color:white; font-size:1.2em;">
-                Clique sur la <b>petite flèche en haut à gauche</b> (ou sur le bouton menu) 
-                pour <b>choisir ton nom</b> ou ajouter un joueur !
-            </p>
+            <p style="color:white; font-size:1.2em;">Ouvre le menu à gauche et <b>choisis ton nom</b> pour voir tes jeux.</p>
         </div>
         """, unsafe_allow_html=True)
-    st.info("Une fois ton nom choisi dans le menu de gauche, ta progression s'affichera ici.")
     st.stop()
 
-# Si l'utilisateur est connecté, on affiche le titre normal
-st.title(f"🎮 Progression de : {utilisateur}")
+st.title(f"🎮 Progression : {utilisateur}")
 
-col_suivi = f"fait_{utilisateur.lower().replace(' ', '_')}"
-if col_suivi not in df.columns:
+# Identification de la colonne de suivi
+col_suivi = None
+for c in df.columns:
+    if utilisateur.lower() in str(c).lower():
+        col_suivi = c
+        break
+
+if col_suivi is None:
+    col_suivi = f"fait_{utilisateur.lower()}"
     df[col_suivi] = ""
 
 search = st.text_input("🔍 Rechercher une boîte...", "").lower()
-df_display = df[df['boite_titre'].astype(str).str.lower().str.contains(search)] if search else df
+title_col = df.columns[1] 
+df_display = df[df[title_col].astype(str).str.lower().str.contains(search)] if search else df
 
 # --- AFFICHAGE DES JEUX ---
 for idx, row in df_display.iterrows():
     
-    # IMAGE RÉDUITE (Moitié de la largeur, centrée)
-    url = str(row.get('image_url', '')).strip()
+    # Image (Colonne 3)
+    url = str(row.iloc[2]).strip()
     if url.startswith('http'):
         c1, c2, c3 = st.columns([1, 2, 1])
-        with c2:
-            st.image(url, use_container_width=True)
-    else:
-        st.info(f"🖼️ {row['boite_titre']} (Image manquante)")
+        with c2: st.image(url, use_container_width=True)
 
-    # TITRE
-    st.markdown(f"<h2 style='text-align: center;'>{row['boite_titre']}</h2>", unsafe_allow_html=True)
+    # Titre (Colonne 2)
+    st.markdown(f"<h2 style='text-align: center;'>{row.iloc[1]}</h2>", unsafe_allow_html=True)
     
-    # LES 3 JEUX (Colonnes D, E, F)
+    # Les 3 jeux (Colonnes 4, 5, 6)
     cols = st.columns(3)
-    faits_actuels = [x.strip() for x in str(row.get(col_suivi, "")).split(',') if x.strip()]
-    noms_des_scenarios = [row.get('nom_jeu_1', 'Jeu 1'), row.get('nom_jeu_2', 'Jeu 2'), row.get('nom_jeu_3', 'Jeu 3')]
-
-    for i, label_jeu in enumerate(noms_des_scenarios, 1):
-        with cols[i-1]:
-            label = str(label_jeu).strip() if str(label_jeu).strip() != "" else f"Jeu {i}"
-            game_id = f"Jeu{i}"
+    faits_actuels = [x.strip() for x in str(row[col_suivi]).split(',') if x.strip()]
+    
+    for i in range(3):
+        nom_jeu = str(row.iloc[i+3]).strip()
+        if not nom_jeu or nom_jeu == "nan": nom_jeu = f"Jeu {i+1}"
+        
+        with cols[i]:
+            game_id = f"Jeu{i+1}"
             is_done = game_id in faits_actuels
             
-            if st.checkbox(label, value=is_done, key=f"{utilisateur}_{idx}_{i}"):
+            # Utilisation d'une clé unique par utilisateur pour éviter les conflits
+            check_key = f"chk_{utilisateur}_{idx}_{i}"
+            
+            if st.checkbox(nom_jeu, value=is_done, key=check_key):
                 if not is_done:
                     faits_actuels.append(game_id)
                     df.at[idx, col_suivi] = ",".join(faits_actuels)
