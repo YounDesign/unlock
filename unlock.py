@@ -6,12 +6,17 @@ import pandas as pd
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_game_data():
-    df_loaded = conn.read(ttl=0)
-    # On s'assure que les colonnes "fait" sont bien traitées comme des booléens ou strings propres
-    for i in range(1, 4):
-        col = f'jeu{i}_fait'
-        if col not in df_loaded.columns: df_loaded[col] = "False"
-    return df_loaded
+    df_loaded = conn.read(worksheet="Catalogue", ttl=0)
+    
+    # Liste des colonnes obligatoires
+    required_columns = ['id', 'boite_titre', 'image_url', 'j1_nom', 'j2_nom', 'j3_nom']
+    
+    # Pour chaque colonne obligatoire, si elle n'existe pas, on la crée vide
+    for col in required_columns:
+        if col not in df_loaded.columns:
+            df_loaded[col] = ""
+            
+    return df_loaded.fillna("")
 
 def save_game_data(df_to_save):
     conn.update(data=df_to_save)
@@ -23,7 +28,15 @@ def game_box_card(idx, row):
     st.markdown(f"""
     <div style='border: 1px solid #ddd; padding:15px; border-radius:10px; margin-bottom:10px; background-color:white; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);'>
         <div style='display:flex; gap:15px;'>
-            <img src="{row['image_url']}" style='width:100px; height:100px; border-radius:5px; object-fit:cover;'>
+             img_src = row['image_url'] if row['image_url'] != "" else "https://via.placeholder.com/150"
+
+st.markdown(f"""
+<div style='...'>
+    <div style='display:flex; gap:15px;'>
+        <img src="{img_src}" style='width:100px; height:100px; border-radius:5px; object-fit:cover;'>
+        ...
+""", unsafe_allow_html=True)
+            
             <div>
                 <h3 style='margin:0;'>{row['boite_titre']}</h3>
                 <p style='color:gray; font-size:0.9em;'>Progression : {sum([1 for i in range(1,4) if str(row[f'jeu{i}_fait']) == 'True'])}/3</p>
