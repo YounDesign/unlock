@@ -27,7 +27,7 @@ def load_game_data():
             
     return df_loaded.fillna("")
 
-def save_game_data(df_to_save):
+def save_game_data(df_to_save)
     # On précise bien l'onglet où sauvegarder
     conn.update(worksheet="Catalogue", data=df_to_save)
     st.cache_data.clear()
