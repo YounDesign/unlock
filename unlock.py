@@ -7,6 +7,9 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_game_data():
     df_loaded = conn.read(worksheet="Catalogue", ttl=0)
+    df = load_game_data()
+    st.write("Colonnes détectées :", list(df.columns)) # Ligne à ajouter pour tester
+    
     
     # Liste des colonnes obligatoires
     required_columns = ['id', 'boite_titre', 'image_url', 'j1_nom', 'j2_nom', 'j3_nom']
