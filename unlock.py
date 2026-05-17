@@ -9,8 +9,8 @@ st.set_page_config(page_title="My Game Tracker", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_game_data():
-    # On lit l'onglet Catalogue
-    df_loaded = conn.read(worksheet="Catalogue", ttl=0)
+    # Lit la toute première feuille par défaut
+    df_loaded = conn.read(ttl=0)
     
     # Liste des colonnes obligatoires pour éviter les erreurs KeyError
     required_columns = [
