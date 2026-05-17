@@ -11,7 +11,6 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # --- FONCTIONS POUR LES UTILISATEURS ---
 def load_users():
     try:
-        # Lit l'onglet "Utilisateurs"
         users_df = conn.read(worksheet="Utilisateurs", ttl=0)
         return users_df.iloc[:, 0].dropna().astype(str).tolist()
     except Exception:
@@ -33,22 +32,19 @@ def add_new_user(new_name):
 # --- FONCTIONS POUR LES JEUX ---
 def load_game_data():
     try:
-        # Lit la première feuille (Catalogue)
         df_loaded = conn.read(ttl=0)
         if df_loaded.empty:
             return pd.DataFrame()
         
-        # Normalisation des noms de colonnes pour le code interne
+        # Normalisation des colonnes
         df_loaded.columns = [str(c).lower().replace(' ', '_').strip() for c in df_loaded.columns]
         
         # RÉCUPÉRATION DES COLONNES D, E, F (Index 3, 4, 5)
-        # On crée des colonnes virtuelles pour être sûr de l'affichage
         if len(df_loaded.columns) >= 6:
-            df_loaded['nom_jeu_1'] = df_loaded.iloc[:, 3] # Colonne D
-            df_loaded['nom_jeu_2'] = df_loaded.iloc[:, 4] # Colonne E
-            df_loaded['nom_jeu_3'] = df_loaded.iloc[:, 5] # Colonne F
+            df_loaded['nom_jeu_1'] = df_loaded.iloc[:, 3]
+            df_loaded['nom_jeu_2'] = df_loaded.iloc[:, 4]
+            df_loaded['nom_jeu_3'] = df_loaded.iloc[:, 5]
             
-        # Nettoyage : on garde les lignes avec un titre
         if 'boite_titre' in df_loaded.columns:
             df_loaded = df_loaded.dropna(subset=['boite_titre'])
             
@@ -57,7 +53,6 @@ def load_game_data():
         return pd.DataFrame()
 
 def save_game_data(df_to_save):
-    # Supprimer les colonnes virtuelles de calcul avant de sauvegarder sur le Sheet
     cols_a_virer = ['nom_jeu_1', 'nom_jeu_2', 'nom_jeu_3']
     df_propre = df_to_save.drop(columns=[c for c in cols_a_virer if c in df_to_save.columns])
     conn.update(data=df_propre)
@@ -71,14 +66,12 @@ df = load_game_data()
 with st.sidebar:
     st.title("👤 JOUEURS")
     
-    # Ajouter un joueur
     with st.expander("➕ Nouveau Joueur"):
         nouveau_nom = st.text_input("Prénom")
-        if st.button("Ajouter à la liste"):
+        if st.button("Ajouter"):
             if nouveau_nom and add_new_user(nouveau_nom):
                 st.success(f"{nouveau_nom} ajouté !"); st.rerun()
 
-    # Choisir son nom
     if joueurs:
         utilisateur = st.selectbox("Qui es-tu ?", joueurs)
     else:
@@ -92,12 +85,11 @@ with st.sidebar:
 
 # --- INTERFACE PRINCIPALE ---
 if not utilisateur:
-    st.info("👋 Bonjour ! Ajoute ton prénom dans la barre latérale pour commencer ton suivi.")
+    st.info("👋 Bonjour ! Ajoute ton prénom dans la barre latérale pour commencer.")
     st.stop()
 
 st.title(f"🎮 Suivi de {utilisateur}")
 
-# Colonne de suivi personnalisée
 col_suivi = f"fait_{utilisateur.lower().replace(' ', '_')}"
 if col_suivi not in df.columns:
     df[col_suivi] = ""
@@ -107,32 +99,32 @@ df_display = df[df['boite_titre'].astype(str).str.lower().str.contains(search)] 
 
 # --- AFFICHAGE DES JEUX ---
 for idx, row in df_display.iterrows():
-    # 1. IMAGE EN GRAND (Prend toute la largeur)
+    
+    # 1. IMAGE RÉDUITE (Moitié de la largeur, centrée)
     url = str(row.get('image_url', '')).strip()
     if url.startswith('http'):
-        st.image(url, use_container_width=True)
+        # On crée 3 colonnes : vide (25%), image (50%), vide (25%)
+        # Cela réduit l'image de moitié par rapport à avant
+        c1, c2, c3 = st.columns([1, 2, 1])
+        with c2:
+            st.image(url, use_container_width=True)
     else:
-        st.info(f"🖼️ Boîte : {row['boite_titre']} (Lien image absent dans la colonne C)")
+        st.info(f"🖼️ {row['boite_titre']} (Image manquante)")
 
     # 2. TITRE
-    st.subheader(row['boite_titre'])
+    st.markdown(f"<h2 style='text-align: center;'>{row['boite_titre']}</h2>", unsafe_allow_html=True)
     
     # 3. LES 3 JEUX (Colonnes D, E, F)
     cols = st.columns(3)
     faits_actuels = [x.strip() for x in str(row.get(col_suivi, "")).split(',') if x.strip()]
-
-    # On utilise les noms récupérés dans D, E et F
     noms_des_scenarios = [row.get('nom_jeu_1', 'Jeu 1'), row.get('nom_jeu_2', 'Jeu 2'), row.get('nom_jeu_3', 'Jeu 3')]
 
     for i, label_jeu in enumerate(noms_des_scenarios, 1):
         with cols[i-1]:
-            # Nettoyage du texte
             label = str(label_jeu).strip() if str(label_jeu).strip() != "" else f"Jeu {i}"
-            
             game_id = f"Jeu{i}"
             is_done = game_id in faits_actuels
             
-            # Case à cocher
             if st.checkbox(label, value=is_done, key=f"{utilisateur}_{idx}_{i}"):
                 if not is_done:
                     faits_actuels.append(game_id)
